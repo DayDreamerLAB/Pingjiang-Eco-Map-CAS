@@ -1,0 +1,1291 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>苏州平江历史街区实时地图 - Pingjiang Live Map</title>
+  <!-- 引入外部资源 -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet">
+  
+  <!-- Tailwind 配置 -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#165DFF',
+            secondary: '#36CFC9',
+            danger: '#F53F3F',
+            warning: '#FF7D00',
+            success: '#00B42A',  // 新增：环保区域绿色
+            dark: '#1D2129',
+            'dark-light': '#2B2F36',
+            'dark-lighter': '#373C45'
+          },
+          fontFamily: {
+            inter: ['Inter', 'system-ui', 'sans-serif'],
+          },
+        },
+      }
+    }
+  </script>
+  
+  <!-- 自定义样式 -->
+  <style type="text/tailwindcss">
+    @layer utilities {
+      .content-auto {
+        content-visibility: auto;
+      }
+      .scrollbar-hide {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+      }
+      .scrollbar-hide::-webkit-scrollbar {
+        display: none;
+      }
+      .map-height {
+        height: calc(100vh - 4rem);
+      }
+      .sidebar-height {
+        height: calc(100vh - 4rem);
+      }
+      .card-hover {
+        @apply transition-all duration-300 hover:shadow-lg hover:shadow-primary/10 hover:-translate-y-1;
+      }
+      .btn-primary {
+        @apply bg-primary text-white px-3 py-1.5 text-xs rounded-md transition-all duration-300 hover:bg-primary/90 active:scale-95;
+      }
+      .btn-secondary {
+        @apply bg-dark-light text-white px-3 py-1.5 text-xs rounded-md transition-all duration-300 hover:bg-dark-lighter active:scale-95;
+      }
+    }
+  </style>
+  
+  <!-- 引入地图样式 -->
+  <style>
+    #map {
+      z-index: 1;
+    }
+    .leaflet-control-zoom {
+      z-index: 2 !important;
+    }
+    .marker-pulse {
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(22, 93, 255, 0.7);
+      }
+      70% {
+        transform: scale(1);
+        box-shadow: 0 0 0 10px rgba(22, 93, 255, 0);
+      }
+      100% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(22, 93, 255, 0);
+      }
+    }
+    /* 环保区域标记的动画 */
+    .marker-pulse-success {
+      animation: pulse-success 2s infinite;
+    }
+    @keyframes pulse-success {
+      0% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(0, 180, 42, 0.7);
+      }
+      70% {
+        transform: scale(1);
+        box-shadow: 0 0 0 10px rgba(0, 180, 42, 0);
+      }
+      100% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(0, 180, 42, 0);
+      }
+    }
+    .info-card {
+      backdrop-filter: blur(8px);
+      background-color: rgba(29, 33, 41, 0.8);
+    }
+    .circle-radius {
+      border: 2px dashed rgba(22, 93, 255, 0.5);
+      border-radius: 50%;
+      background-color: rgba(22, 93, 255, 0.1);
+      opacity: 0.7;
+      transition: all 0.3s ease;
+    }
+    .circle-radius.active {
+      background-color: rgba(22, 93, 255, 0.2);
+      border-color: rgba(22, 93, 255, 0.8);
+    }
+  </style>
+</head>
+<body class="font-inter bg-dark text-white overflow-hidden">
+  <!-- 顶部导航栏 -->
+  <header class="bg-dark-light h-16 flex items-center justify-between px-4 md:px-6 border-b border-dark-lighter z-30 relative">
+    <div class="flex items-center space-x-2">
+      <i class="fa fa-map-marker text-primary text-2xl"></i>
+      <h1 class="text-xl md:text-2xl font-bold">平江历史街区实时地图 <span class="text-sm font-normal text-gray-400 ml-2">Pingjiang Live Map</span></h1>
+    </div>
+    
+    <div class="flex items-center space-x-4">
+      <div class="hidden md:flex items-center space-x-2 bg-dark-lighter rounded-md px-3 py-1.5">
+        <i class="fa fa-clock-o text-gray-400"></i>
+        <span id="current-time" class="text-sm text-gray-300"></span>
+      </div>
+      
+      <button id="toggle-sidebar" class="md:hidden btn-secondary p-2">
+        <i class="fa fa-bars"></i>
+      </button>
+      
+      <div class="relative">
+        <button id="refresh-map" class="btn-primary flex items-center space-x-1">
+          <i class="fa fa-refresh"></i>
+          <span class="hidden md:inline">刷新</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="flex h-full">
+    <!-- 左侧边栏 -->
+    <aside id="sidebar" class="w-0 md:w-80 bg-dark-light sidebar-height overflow-hidden transition-all duration-300 z-20">
+      <div class="p-4 h-full flex flex-col overflow-y-auto scrollbar-hide">
+        <!-- 筛选器 -->
+        <div class="mb-4">
+          <h2 class="text-lg font-semibold mb-3 flex items-center">
+            <i class="fa fa-filter text-primary mr-2"></i>筛选条件
+          </h2>
+          <div class="space-y-3">
+            <div>
+              <label class="text-sm text-gray-400 mb-1 block">搜索范围</label>
+              <div class="grid grid-cols-3 gap-2">
+                <button data-radius="50" class="radius-btn bg-dark-lighter rounded-md px-2 py-2 text-sm text-center hover:bg-primary/20 transition-colors">
+                  50米
+                </button>
+                <button data-radius="100" class="radius-btn bg-dark-lighter rounded-md px-2 py-2 text-sm text-center hover:bg-primary/20 transition-colors">
+                  100米
+                </button>
+                <button data-radius="200" class="radius-btn bg-dark-lighter rounded-md px-2 py-2 text-sm text-center hover:bg-primary/20 transition-colors">
+                  200米
+                </button>
+                <button data-radius="500" class="radius-btn bg-dark-lighter rounded-md px-2 py-2 text-sm text-center hover:bg-primary/20 transition-colors">
+                  500米
+                </button>
+                <button data-radius="1000" class="radius-btn bg-dark-lighter rounded-md px-2 py-2 text-sm text-center hover:bg-primary/20 transition-colors">
+                  1公里
+                </button>
+                <button data-radius="2000" class="radius-btn bg-dark-lighter rounded-md px-2 py-2 text-sm text-center hover:bg-primary/20 transition-colors">
+                  2公里
+                </button>
+              </div>
+            </div>
+            
+            <div>
+              <label class="text-sm text-gray-400 mb-1 block">事件类型</label>
+              <div class="grid grid-cols-2 gap-2">
+                <label class="flex items-center space-x-2 bg-dark-lighter rounded-md px-3 py-2 cursor-pointer hover:bg-dark-lighter/80 transition-colors">
+                  <input type="checkbox" checked class="accent-primary" data-type="attraction">
+                  <span class="text-sm">景点</span>
+                </label>
+                <label class="flex items-center space-x-2 bg-dark-lighter rounded-md px-3 py-2 cursor-pointer hover:bg-dark-lighter/80 transition-colors">
+                  <input type="checkbox" checked class="accent-warning" data-type="construction">
+                  <span class="text-sm">施工区域</span>
+                </label>
+                <label class="flex items-center space-x-2 bg-dark-lighter rounded-md px-3 py-2 cursor-pointer hover:bg-dark-lighter/80 transition-colors hidden">
+                  <input type="checkbox" class="accent-danger" data-type="traffic">
+                  <span class="text-sm">交通状况</span>
+                </label>
+                <label class="flex items-center space-x-2 bg-dark-lighter rounded-md px-3 py-2 cursor-pointer hover:bg-dark-lighter/80 transition-colors">
+                  <input type="checkbox" checked class="accent-secondary" data-type="shop">
+                  <span class="text-sm">特色店铺</span>
+                </label>
+                <!-- 新增：环保区域事件类型 -->
+                <label class="flex items-center space-x-2 bg-dark-lighter rounded-md px-3 py-2 cursor-pointer hover:bg-dark-lighter/80 transition-colors">
+                  <input type="checkbox" checked class="accent-success" data-type="environmental">
+                  <span class="text-sm">环保区域</span>
+                </label>
+              </div>
+            </div>
+            
+            <div>
+              <label class="text-sm text-gray-400 mb-1 block">关键词搜索</label>
+              <div class="relative">
+                <input type="text" id="keyword-search" placeholder="输入景点或店铺名称..." class="w-full bg-dark-lighter border border-dark rounded-md pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                <i class="fa fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+              </div>
+            </div>
+            
+            <button id="apply-filter" class="w-full btn-primary">应用筛选</button>
+          </div>
+        </div>
+        
+        <!-- 统计卡片 -->
+        <div class="mb-4">
+          <h2 class="text-lg font-semibold mb-3 flex items-center">
+            <i class="fa fa-bar-chart text-primary mr-2"></i>实时统计
+          </h2>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="bg-dark-lighter rounded-lg p-3 card-hover">
+              <div class="text-gray-400 text-xs mb-1">景点数量</div>
+              <div class="text-xl font-bold text-primary">16</div>
+              <div class="flex items-center text-xs text-gray-400 mt-1">
+                <i class="fa fa-check text-success mr-1"></i> 全部开放
+              </div>
+            </div>
+            <div class="bg-dark-lighter rounded-lg p-3 card-hover">
+              <div class="text-gray-400 text-xs mb-1">施工区域</div>
+              <div class="text-xl font-bold text-warning">3</div>
+              <div class="flex items-center text-xs text-gray-400 mt-1">
+                <i class="fa fa-clock-o text-gray-400 mr-1"></i> 近期完工
+              </div>
+            </div>
+            <div class="bg-dark-lighter rounded-lg p-3 card-hover hidden">
+              <div class="text-gray-400 text-xs mb-1">拥堵路段</div>
+              <div class="text-xl font-bold text-danger">2</div>
+              <div class="flex items-center text-xs text-gray-400 mt-1">
+                <i class="fa fa-arrow-down text-success mr-1"></i> 较昨日减少
+              </div>
+            </div>
+            <div class="bg-dark-lighter rounded-lg p-3 card-hover">
+              <div class="text-gray-400 text-xs mb-1">环保区域</div>
+              <div class="text-xl font-bold text-success">5</div>
+              <div class="flex items-center text-xs text-gray-400 mt-1">
+                <i class="fa fa-leaf text-success mr-1"></i> 全部获评示范
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 最近事件 -->
+        <div class="flex-1 overflow-y-auto scrollbar-hide">
+          <h2 class="text-lg font-semibold mb-3 flex items-center">
+            <i class="fa fa-bell text-primary mr-2"></i>最近事件
+          </h2>
+          <div class="space-y-3">
+            <!-- 新增：环保区域事件 -->
+            <div class="bg-dark-lighter rounded-lg p-3 card-hover border-l-4 border-success">
+              <div class="flex justify-between items-start mb-1">
+                <h3 class="font-medium">大儒巷获评环保示范区域</h3>
+                <span class="text-xs text-gray-400">刚刚</span>
+              </div>
+              <p class="text-sm text-gray-300 mb-2">大儒巷因良好的绿植布局和街道清洁情况，被评为街区环保示范区域。</p>
+              <div class="flex justify-between items-center">
+                <span class="text-xs bg-success/20 text-success px-2 py-0.5 rounded">环保区域</span>
+                <button class="text-xs text-primary hover:underline view-detail" data-id="environmental-1">查看详情</button>
+              </div>
+            </div>
+            
+            <div class="bg-dark-lighter rounded-lg p-3 card-hover border-l-4 border-success">
+              <div class="flex justify-between items-start mb-1">
+                <h3 class="font-medium">临顿路获评环保示范区域</h3>
+                <span class="text-xs text-gray-400">1天前</span>
+              </div>
+              <p class="text-sm text-gray-300 mb-2">临顿路因良好的绿植布局和街道清洁情况，被评为街区环保示范区域。</p>
+              <div class="flex justify-between items-center">
+                <span class="text-xs bg-success/20 text-success px-2 py-0.5 rounded">环保区域</span>
+                <button class="text-xs text-primary hover:underline view-detail" data-id="environmental-2">查看详情</button>
+              </div>
+            </div>
+            
+            <div class="bg-dark-lighter rounded-lg p-3 card-hover border-l-4 border-success">
+              <div class="flex justify-between items-start mb-1">
+                <h3 class="font-medium">干将东路获评环保示范区域</h3>
+                <span class="text-xs text-gray-400">2天前</span>
+              </div>
+              <p class="text-sm text-gray-300 mb-2">干将东路因良好的绿植布局和街道清洁情况，被评为街区环保示范区域。</p>
+              <div class="flex justify-between items-center">
+                <span class="text-xs bg-success/20 text-success px-2 py-0.5 rounded">环保区域</span>
+                <button class="text-xs text-primary hover:underline view-detail" data-id="environmental-3">查看详情</button>
+              </div>
+            </div>
+            
+            <div class="bg-dark-lighter rounded-lg p-3 card-hover border-l-4 border-success">
+              <div class="flex justify-between items-start mb-1">
+                <h3 class="font-medium">平江路获评环保示范区域</h3>
+                <span class="text-xs text-gray-400">3天前</span>
+              </div>
+              <p class="text-sm text-gray-300 mb-2">平江路因良好的绿植布局和街道清洁情况，被评为街区环保示范区域。</p>
+              <div class="flex justify-between items-center">
+                <span class="text-xs bg-success/20 text-success px-2 py-0.5 rounded">环保区域</span>
+                <button class="text-xs text-primary hover:underline view-detail" data-id="environmental-4">查看详情</button>
+              </div>
+            </div>
+            
+            <div class="bg-dark-lighter rounded-lg p-3 card-hover border-l-4 border-success">
+              <div class="flex justify-between items-start mb-1">
+                <h3 class="font-medium">钮家巷获评环保示范区域</h3>
+                <span class="text-xs text-gray-400">4天前</span>
+              </div>
+              <p class="text-sm text-gray-300 mb-2">钮家巷因良好的绿植布局和街道清洁情况，被评为街区环保示范区域。</p>
+              <div class="flex justify-between items-center">
+                <span class="text-xs bg-success/20 text-success px-2 py-0.5 rounded">环保区域</span>
+                <button class="text-xs text-primary hover:underline view-detail" data-id="environmental-5">查看详情</button>
+              </div>
+            </div>
+            
+            <div class="bg-dark-lighter rounded-lg p-3 card-hover border-l-4 border-warning">
+              <div class="flex justify-between items-start mb-1">
+                <h3 class="font-medium">平江路部分路段施工</h3>
+                <span class="text-xs text-gray-400">2天前</span>
+              </div>
+              <p class="text-sm text-gray-300 mb-2">平江路中段（大儒巷至中张家巷）进行管线维修，预计3天内完成，请注意绕行。</p>
+              <div class="flex justify-between items-center">
+                <span class="text-xs bg-warning/20 text-warning px-2 py-0.5 rounded">道路施工</span>
+                <button class="text-xs text-primary hover:underline view-detail" data-id="construction-1">查看详情</button>
+              </div>
+            </div>
+            
+            <div class="bg-dark-lighter rounded-lg p-3 card-hover border-l-4 border-danger hidden">
+              <div class="flex justify-between items-start mb-1">
+                <h3 class="font-medium">临顿路与干将路交叉口拥堵</h3>
+                <span class="text-xs text-gray-400">1小时前</span>
+              </div>
+              <p class="text-sm text-gray-300 mb-2">早高峰期间，临顿路与干将路交叉口车流量较大，建议绕行白塔东路或东北街。</p>
+              <div class="flex justify-between items-center">
+                <span class="text-xs bg-danger/20 text-danger px-2 py-0.5 rounded">交通拥堵</span>
+                <button class="text-xs text-primary hover:underline view-detail" data-id="traffic-1">查看详情</button>
+              </div>
+            </div>
+            
+            <div class="bg-dark-lighter rounded-lg p-3 card-hover border-l-4 border-primary">
+              <div class="flex justify-between items-start mb-1">
+                <h3 class="font-medium">苏州状元博物馆临时闭馆</h3>
+                <span class="text-xs text-gray-400">3天前</span>
+              </div>
+              <p class="text-sm text-gray-300 mb-2">因内部展品调整，苏州状元博物馆将于本周三至周五闭馆，周六正常开放。</p>
+              <div class="flex justify-between items-center">
+                <span class="text-xs bg-primary/20 text-primary px-2 py-0.5 rounded">景点公告</span>
+                <button class="text-xs text-primary hover:underline view-detail" data-id="attraction-1">查看详情</button>
+              </div>
+            </div>
+            
+            <div class="bg-dark-lighter rounded-lg p-3 card-hover border-l-4 border-secondary">
+              <div class="flex justify-between items-start mb-1">
+                <h3 class="font-medium">猫的天空之城新店开业</h3>
+                <span class="text-xs text-gray-400">1周前</span>
+              </div>
+              <p class="text-sm text-gray-300 mb-2">知名文创品牌猫的天空之城在平江路开设新店，位于平江路188号，开业期间有优惠活动。</p>
+              <div class="flex justify-between items-center">
+                <span class="text-xs bg-secondary/20 text-secondary px-2 py-0.5 rounded">新店开业</span>
+                <button class="text-xs text-primary hover:underline view-detail" data-id="shop-1">查看详情</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+    
+    <!-- 地图主区域 -->
+    <main class="flex-1 relative">
+      <div id="map" class="map-height"></div>
+      
+      <!-- 移动端底部操作栏 -->
+      <div class="md:hidden fixed bottom-4 left-4 right-4 flex justify-between z-20">
+        <button id="my-location" class="btn-secondary p-3 rounded-full">
+          <i class="fa fa-location-arrow"></i>
+        </button>
+        <button id="zoom-in" class="btn-secondary p-3 rounded-full">
+          <i class="fa fa-plus"></i>
+        </button>
+        <button id="zoom-out" class="btn-secondary p-3 rounded-full">
+          <i class="fa fa-minus"></i>
+        </button>
+        <button id="show-info" class="btn-primary p-3 rounded-full">
+          <i class="fa fa-info"></i>
+        </button>
+      </div>
+      
+      <!-- 信息卡片（默认隐藏） -->
+      <div id="info-card" class="hidden absolute top-4 right-4 w-72 info-card rounded-lg shadow-xl p-4 border border-dark-lighter z-20">
+        <div class="flex justify-between items-start mb-3">
+          <h3 id="info-title" class="font-bold text-lg">景点名称</h3>
+          <button id="close-info" class="text-gray-400 hover:text-white">
+            <i class="fa fa-times"></i>
+          </button>
+        </div>
+        <div id="info-image" class="w-full h-40 rounded-md mb-3 overflow-hidden">
+          <!-- 图片将通过JS动态添加 -->
+        </div>
+        <div class="space-y-2 mb-3">
+          <div class="flex items-center text-sm">
+            <i class="fa fa-map-marker text-primary mr-2 w-4 text-center"></i>
+            <span id="info-address">地址信息</span>
+          </div>
+          <div class="flex items-center text-sm">
+            <i class="fa fa-users text-success mr-2 w-4 text-center"></i>
+            <span id="info-visitors">当前人流：<span class="font-medium">适中</span></span>
+          </div>
+          <div class="flex items-center text-sm">
+            <i class="fa fa-clock-o text-gray-400 mr-2 w-4 text-center"></i>
+            <span id="info-hours">开放时间：09:00-17:00</span>
+          </div>
+          <div class="flex items-center text-sm">
+            <i class="fa fa-phone text-gray-400 mr-2 w-4 text-center"></i>
+            <span id="info-phone">联系电话：0512-12345678</span>
+          </div>
+          <!-- 新增：环保区域信息展示 -->
+          <div id="environmental-info" class="hidden">
+            <div class="flex items-start text-sm mt-2">
+              <i class="fa fa-leaf text-success mr-2 w-4 text-center mt-0.5"></i>
+              <div>
+                <div id="greenery-evaluation" class="mb-1">绿植布局评价：...</div>
+                <div id="cleanliness-situation">街道清洁情况：...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="h-24 mb-3">
+          <canvas id="visitor-chart"></canvas>
+        </div>
+        <div class="flex space-x-2">
+          <button id="view-monitor" class="flex-1 btn-primary text-sm">查看实时监控</button>
+          <button id="get-direction" class="flex-1 btn-secondary text-sm">导航前往</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- JavaScript -->
+  <script>
+    // 更新当前时间
+    function updateCurrentTime() {
+      const now = new Date();
+      const timeString = now.toLocaleString('zh-CN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+      document.getElementById('current-time').textContent = timeString;
+    }
+    
+    setInterval(updateCurrentTime, 1000);
+    updateCurrentTime();
+    
+    // 侧边栏切换（移动端）
+    const toggleSidebar = document.getElementById('toggle-sidebar');
+    const sidebar = document.getElementById('sidebar');
+    
+    toggleSidebar.addEventListener('click', () => {
+      if (sidebar.classList.contains('w-0')) {
+        sidebar.classList.remove('w-0');
+        sidebar.classList.add('w-72');
+      } else {
+        sidebar.classList.remove('w-72');
+        sidebar.classList.add('w-0');
+      }
+    });
+    
+    // 初始化地图
+    // 平江历史街区中心点坐标：经度120.631841、纬度31.323443
+    const map = L.map('map', {
+      zoomControl: true,
+      attributionControl: false,
+      minZoom: 15,
+      maxZoom: 19,
+      maxBounds: [
+        [31.335, 120.645], // 东北角
+        [31.315, 120.620]  // 西南角
+      ]
+    }).setView([31.323443, 120.631841], 16); // 平江历史街区中心点坐标
+    
+    // 添加地图图层
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      tileSize: 512,
+      zoomOffset: -1
+    }).addTo(map);
+    
+    // 自定义标记图标
+    const attractionIcon = L.divIcon({
+      className: 'custom-marker',
+      html: '<div class="w-4 h-4 bg-primary rounded-full marker-pulse"></div>',
+      iconSize: [20, 20],
+      iconAnchor: [10, 10]
+    });
+    
+    const constructionIcon = L.divIcon({
+      className: 'custom-marker',
+      html: '<div class="w-4 h-4 bg-warning rounded-full marker-pulse"></div>',
+      iconSize: [20, 20],
+      iconAnchor: [10, 10]
+    });
+    
+    const trafficIcon = L.divIcon({
+      className: 'custom-marker',
+      html: '<div class="w-4 h-4 bg-danger rounded-full marker-pulse"></div>',
+      iconSize: [20, 20],
+      iconAnchor: [10, 10]
+    });
+    
+    const shopIcon = L.divIcon({
+      className: 'custom-marker',
+      html: '<div class="w-4 h-4 bg-secondary rounded-full marker-pulse"></div>',
+      iconSize: [20, 20],
+      iconAnchor: [10, 10]
+    });
+    
+    // 新增：环保区域绿色图标
+    const environmentalIcon = L.divIcon({
+      className: 'custom-marker',
+      html: '<div class="w-4 h-4 bg-success rounded-full marker-pulse-success"></div>',
+      iconSize: [20, 20],
+      iconAnchor: [10, 10]
+    });
+    
+    // 半径圆圈
+    let radiusCircle = null;
+    let currentRadius = 200; // 默认200米
+    
+    // 添加半径圆圈的函数
+    function addRadiusCircle(lat, lng, radius) {
+      // 如果已有圆圈，先移除
+      if (radiusCircle) {
+        map.removeLayer(radiusCircle);
+      }
+      
+      // 添加新圆圈
+      radiusCircle = L.circle([lat, lng], {
+        radius: radius,
+        className: 'circle-radius',
+        weight: 2,
+        color: '#165DFF',
+        fillColor: '#165DFF',
+        fillOpacity: 0.1
+      }).addTo(map);
+      
+      currentRadius = radius;
+    }
+    
+    // 初始化时添加默认半径圆圈
+    addRadiusCircle(31.323443, 120.631841, currentRadius);
+    
+    // 半径按钮点击事件
+    document.querySelectorAll('.radius-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        const radius = parseInt(this.dataset.radius);
+        
+        // 更新按钮样式
+        document.querySelectorAll('.radius-btn').forEach(b => {
+          b.classList.remove('bg-primary/20', 'text-primary');
+          b.classList.add('bg-dark-lighter');
+        });
+        this.classList.remove('bg-dark-lighter');
+        this.classList.add('bg-primary/20', 'text-primary');
+        
+        // 更新半径圆圈
+        addRadiusCircle(31.323443, 120.631841, radius);
+        
+        // 筛选标记
+        filterMarkers();
+      });
+    });
+    
+    // 平江历史街区主要景点数据
+    const attractionsData = [
+      {
+        id: 'attraction-1',
+        name: '苏州状元博物馆',
+        address: '姑苏区钮家巷3号',
+        coordinates: [31.3238, 120.6310],
+        type: 'attraction',
+        hours: '09:00-17:00',
+        phone: '0512-67278070',
+        visitors: '较多',
+        description: '位于潘世恩故居内，展示苏州54位状元的历史故事和文物。',
+        image: 'https://i.hd-r.cn/02ab6e35-8b20-46a3-9b9c-6429e7d58a57.jpg'
+      },
+      {
+        id: 'attraction-2',
+        name: '苏州评弹博物馆',
+        address: '姑苏区中张家巷14号',
+        coordinates: [31.3225, 120.6320],
+        type: 'attraction',
+        hours: '09:00-17:00',
+        phone: '0512-67278071',
+        visitors: '适中',
+        description: '展示苏州评弹艺术的历史和发展，收藏了大量珍贵史料。',
+        image: 'https://i.hd-r.cn/84a6bef9-584e-42ca-be19-1e754dab7e39.jpg'
+      },
+      {
+        id: 'attraction-3',
+        name: '中国昆曲博物馆',
+        address: '姑苏区中张家巷14号',
+        coordinates: [31.3223, 120.6318],
+        type: 'attraction',
+        hours: '09:00-17:00',
+        phone: '0512-67278072',
+        visitors: '较少',
+        description: '位于全晋会馆内，展示昆曲艺术的历史和文化。',
+        image: 'https://i.hd-r.cn/116c2c0d-25d5-4609-8416-2d67c8ffc34d.jpg'
+      },
+      {
+        id: 'attraction-4',
+        name: '耦园',
+        address: '姑苏区小新桥巷6号',
+        coordinates: [31.3245, 120.6350],
+        type: 'attraction',
+        hours: '07:30-17:30',
+        phone: '0512-67278073',
+        visitors: '较多',
+        description: '世界文化遗产，清代园林，以"耦"字命名，象征夫妻恩爱。',
+        image: 'https://i.hd-r.cn/56985b44-4525-407a-97c2-d7c8b6f9c2e9.jpg'
+      },
+      {
+        id: 'attraction-5',
+        name: '苏州苏扇博物馆',
+        address: '姑苏区平江路97号',
+        coordinates: [31.3215, 120.6305],
+        type: 'attraction',
+        hours: '10:00-18:00',
+        phone: '0512-67278074',
+        visitors: '适中',
+        description: '展示苏州传统扇子文化和制作工艺。',
+        image: 'https://i.hd-r.cn/4ca63a0f-9e82-489f-a742-38dc99719c4e.jpg'
+      },
+      {
+        id: 'attraction-6',
+        name: '卫道观',
+        address: '姑苏区平江路卫道观前16号',
+        coordinates: [31.3228, 120.6335],
+        type: 'attraction',
+        hours: '09:00-16:30',
+        phone: '0512-67278075',
+        visitors: '较少',
+        description: '始建于宋末元初的道教建筑，传说明代状元申时行曾在此读书。',
+        image: 'https://i.hd-r.cn/ed7e3bf7-eda7-4f37-aac4-22233067cdca.jpg'
+      },
+      {
+        id: 'attraction-7',
+        name: '潘祖荫故居',
+        address: '姑苏区平江路悬桥巷',
+        coordinates: [31.3240, 120.6325],
+        type: 'attraction',
+        hours: '不对外开放',
+        phone: '0512-67278076',
+        visitors: '不适用',
+        description: '清代探花潘祖荫的故居，现在已改建为民宿。',
+        image: 'https://i.hd-r.cn/83dc6684-958a-4542-906e-368636c2fa88.jpg'
+      },
+      {
+        id: 'attraction-8',
+        name: '雪糕桥',
+        address: '姑苏区肖家巷东端',
+        coordinates: [31.3238, 120.6340],
+        type: 'attraction',
+        hours: '全天开放',
+        phone: '无',
+        visitors: '适中',
+        description: '因孝子抟雪为糕奉亲的传说而得名的古桥。',
+        image: 'https://i.hd-r.cn/0f38a350-ed2f-4a06-96f6-c76d60417c6a.jpg'
+      },
+      {
+        id: 'attraction-9',
+        name: '古昭庆寺',
+        address: '姑苏区平江路142号',
+        coordinates: [31.3220, 120.6315],
+        type: 'attraction',
+        hours: '09:00-17:00',
+        phone: '0512-67278077',
+        visitors: '较少',
+        description: '始建于元代的古寺，现在是文化中心，定期举办非遗展览。',
+        image: 'https://i.hd-r.cn/ac3789bd-6df7-4ea1-8fe1-5e67d165e069.jpg'
+      },
+      {
+        id: 'attraction-10',
+        name: '平江图碑亭',
+        address: '姑苏区平江路南入口',
+        coordinates: [31.3195, 120.6300],
+        type: 'attraction',
+        hours: '全天开放',
+        phone: '无',
+        visitors: '较多',
+        description: '展示南宋《平江图》复制品的碑亭，原碑现藏于苏州碑刻博物馆。',
+        image: 'https://i.hd-r.cn/2dbb5262-4cea-4d64-9662-cee6903dce47.jpg'
+      }
+    ];
+    
+    // 施工区域数据
+    const constructionData = [
+      {
+        id: 'construction-1',
+        name: '平江路中段施工',
+        address: '平江路大儒巷至中张家巷段',
+        coordinates: [31.3225, 120.6310],
+        type: 'construction',
+        startDate: '2025-11-15',
+        endDate: '2025-11-20',
+        description: '进行管线维修施工，预计3天内完成。',
+        image: 'https://images.unsplash.com/photo-1581092918333-81619fc482a0?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=800&q=80'
+      },
+      {
+        id: 'construction-3',
+        name: '东北街施工',
+        address: '东北街拙政园段',
+        coordinates: [31.3265, 120.6315],
+        type: 'construction',
+        startDate: '2025-11-18',
+        endDate: '2025-11-22',
+        description: '进行人行道维修，预计4天内完成。',
+        image: 'https://images.unsplash.com/photo-1507670064245-185e12ee8823?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=800&q=80'
+      }
+    ];
+    
+    // 交通状况数据
+    const trafficData = [
+      {
+        id: 'traffic-1',
+        name: '临顿路与干将路交叉口拥堵',
+        address: '临顿路与干将路交叉口',
+        coordinates: [31.3205, 120.6285],
+        type: 'traffic',
+        level: '中度拥堵',
+        description: '早高峰期间车流量较大，建议绕行白塔东路或东北街。',
+        image: 'https://images.unsplash.com/photo-1506970845246-18f21d5348ae?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=800&q=80'
+      },
+      {
+        id: 'traffic-2',
+        name: '干将路交通管制',
+        address: '干将路平江路路口',
+        coordinates: [31.3200, 120.6305],
+        type: 'traffic',
+        level: '交通管制',
+        description: '因施工需要，干将路平江路路口实施临时交通管制。',
+        image: 'https://images.unsplash.com/photo-1554866585-1f9757f13a26?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=800&q=80'
+      }
+    ];
+    
+    // 特色店铺数据
+    const shopData = [
+      {
+        id: 'shop-2',
+        name: '潘玉麟糖粥铺',
+        address: '平江路94号',
+        coordinates: [31.3210, 120.6308],
+        type: 'shop',
+        hours: '08:00-18:00',
+        phone: '无',
+        description: '传统苏州小吃，赤豆糊糖粥是招牌产品。',
+        image: 'https://i.hd-r.cn/1a5d2f8e-03ed-4731-a7e9-7b709514937e.jpg'
+      },
+      {
+        id: 'shop-3',
+        name: '鸡脚旮旯',
+        address: '平江路108号',
+        coordinates: [31.3212, 120.6309],
+        type: 'shop',
+        hours: '11:00-20:00',
+        phone: '0512-67278081',
+        description: '特色小吃店，卤鸡爪是招牌产品。',
+        image: 'https://i.hd-r.cn/e2364d86-6f9d-4435-80ff-e48f9d14f4e9.jpg'
+      }
+    ];
+    
+    // 新增：环保区域数据
+    const environmentalData = [
+      {
+        id: 'environmental-1',
+        name: '大儒巷环保示范区域',
+        address: '姑苏区大儒巷',
+        coordinates: [31.323019, 120.630525], // 大儒巷附近
+        type: 'environmental',
+        description: '大儒巷因良好的生态环境和管理被评为环保示范区域',
+        greeneryEvaluation: '种植密度适中，约每棵之间间隔5米。大部分树木皆种植于道路两边，门店门口有较多的盆栽花卉。',
+        cleanlinessSituation: '较为干净，路上除散落的落叶外，无其他明显垃圾。',
+        images: [
+          'https://youke1.picui.cn/s1/2025/12/03/693025be4d6ef.jpg',
+          'https://youke1.picui.cn/s1/2025/12/03/693025c22790b.jpg',
+          'https://youke1.picui.cn/s1/2025/12/03/693025c29caa8.jpg',
+          'https://youke1.picui.cn/s1/2025/12/03/693025c2cfeca.jpg',
+          'https://youke1.picui.cn/s1/2025/12/03/693025c549a7e.jpg'
+        ]
+      },
+      {
+        id: 'environmental-2',
+        name: '临顿路环保示范区域',
+        address: '姑苏区临顿路',
+        coordinates: [31.320512, 120.628519], // 临顿路与干将路交叉口附近
+        type: 'environmental',
+        description: '临顿路因良好的生态环境和管理被评为环保示范区域',
+        greeneryEvaluation: '种植密度适中，约每棵之间间隔5米。大部分树木皆种植于道路两边。',
+        cleanlinessSituation: '较为干净，路上除散落的落叶外，无其他明显垃圾。电动车、共享单车停放有序。',
+        images: [
+          'https://i.hd-r.cn/a8e9ad08-163e-40c8-9175-2ab914313aaa.jpg',
+'https://i.hd-r.cn/1e7dea04-df47-4fb4-88dd-51ed99c2c64b.jpg',
+'https://i.hd-r.cn/e0154831-bcb9-4e1e-9b8f-8859163405e8.jpg',
+'https://i.hd-r.cn/43f0698f-9232-4160-b230-6e3fadd96cd7.jpg',
+'https://i.hd-r.cn/1dea77bb-97ad-4a5c-b0df-c48661da43e3.jpg',
+'https://i.hd-r.cn/78bdbd99-0b7e-45f4-a8fa-26e2173815bd.jpg',
+'https://i.hd-r.cn/bbac42df-3b3c-40df-82fd-19c3932979f2.jpg',
+'https://i.hd-r.cn/9413a2cc-b74d-400a-9a54-59faf16a4209.jpg'
+        ]
+      },
+      {
+        id: 'environmental-3',
+        name: '干将东路环保示范区域',
+        address: '姑苏区干将东路',
+        coordinates: [31.320015, 120.630518], // 干将路平江路路口附近
+        type: 'environmental',
+        description: '干将东路因良好的生态环境和管理被评为环保示范区域',
+        greeneryEvaluation: '种植密度适中，约每棵之间间隔5米。树木皆种植于道路左中右侧。',
+        cleanlinessSituation: '较为干净，路上除散落的落叶外，无其他明显垃圾。电动车、共享单车停放有序。',
+        images: [
+          'https://i.hd-r.cn/05303a48-16ca-4b26-87bf-9f69377967e9.jpg',
+'https://i.hd-r.cn/32e3852a-a0e7-4fbd-9de8-3689447c1b0e.jpg',
+'https://i.hd-r.cn/f6da3391-b0dd-47fb-baef-1ad78b25f89e.jpg',
+'https://i.hd-r.cn/f31a481a-71c6-4702-a301-a48c3c27ae20.jpg',
+'https://i.hd-r.cn/20522a40-afc6-4ce6-88c7-e68756f6972c.jpg',
+'https://i.hd-r.cn/5b3432aa-41b3-46e5-ac85-c6be7590ac56.jpg',
+'https://i.hd-r.cn/e695f8ff-11ec-4052-ba6f-d00ba426b3fc.jpg',
+'https://i.hd-r.cn/b32949d2-82c6-4e00-88b0-0d808cfe3697.jpg'
+        ]
+      },
+      {
+        id: 'environmental-4',
+        name: '平江路环保示范区域',
+        address: '姑苏区平江路',
+        coordinates: [31.321518, 120.631024], // 平江路中段
+        type: 'environmental',
+        description: '平江路因良好的生态环境和管理被评为环保示范区域',
+        greeneryEvaluation: '种植密度大，约每棵之间间隔2-3米。树木皆种植于道路左右侧。',
+        cleanlinessSituation: '较为干净，路上除散落的落叶外，无其他明显垃圾。',
+        images: [
+          'https://i.hd-r.cn/1411a7b1-10cf-4e6e-b02c-ca993858620d.jpg',
+'https://i.hd-r.cn/d703f8ae-a09b-487c-816b-20f27be2fb19.jpg',
+'https://i.hd-r.cn/7ff9bd9c-7938-4ba6-b026-10b3e798a4d8.jpg',
+'https://i.hd-r.cn/a8ea9566-1c17-4efc-943b-5d1710b7592c.jpg',
+'https://i.hd-r.cn/77dd2b0f-95d9-47cb-8dbc-b7f8eabf74de.jpg',
+'https://i.hd-r.cn/26147b93-b1d8-4a34-b17e-90964a08cf89.jpg',
+'https://i.hd-r.cn/92aefe7f-d2c9-483a-ae63-fd6c850611c0.jpg'
+        ]
+      },
+      {
+        id: 'environmental-5',
+        name: '钮家巷环保示范区域',
+        address: '姑苏区钮家巷',
+        coordinates: [31.323416, 120.631022], // 钮家巷与平江路交叉口附近
+        type: 'environmental',
+        description: '钮家巷因良好的生态环境和管理被评为环保示范区域',
+        greeneryEvaluation: '种植密度适中，约每棵之间间隔5米。树木仅种植于道路左侧。',
+        cleanlinessSituation: '较为干净，路上除散落的落叶外，无其他明显垃圾。',
+        images: [
+          'https://i.hd-r.cn/b9ea6d1c-c2fb-4829-b777-d9bef9a7a6ad.jpg',
+'https://i.hd-r.cn/d6258126-f357-4c2a-95aa-976f7fbf9c13.jpg',
+'https://i.hd-r.cn/77f58cc7-0ce5-4896-85c4-620a9fb6af78.jpg',
+'https://i.hd-r.cn/672ecfc3-644f-4639-8bc5-5b70c678432b.jpg',
+'https://i.hd-r.cn/b623524d-a655-4954-adde-693945e471d1.jpg'
+        ]
+      }
+    ];
+    
+    // 合并所有数据（不包含交通数据，避免显示红色标记）
+    const allData = [...attractionsData, ...constructionData, ...shopData, ...environmentalData];
+    
+    // 存储所有标记的对象
+    const markers = {};
+    
+    // 添加标记到地图
+    function addMarkers() {
+      allData.forEach(item => {
+        let icon;
+        switch(item.type) {
+          case 'attraction': icon = attractionIcon; break;
+          case 'construction': icon = constructionIcon; break;
+          case 'traffic': icon = trafficIcon; break;
+          case 'shop': icon = shopIcon; break;
+          case 'environmental': icon = environmentalIcon; break; // 新增：环保区域图标
+        }
+        
+        const marker = L.marker(item.coordinates, { icon }).addTo(map);
+        
+        // 存储标记对象
+        markers[item.id] = marker;
+        
+        // 点击标记显示信息卡片
+        marker.on('click', () => {
+          showInfoCard(item);
+        });
+      });
+    }
+    
+    // 初始化时添加所有标记
+    addMarkers();
+    
+    // 筛选标记的函数
+    function filterMarkers() {
+      const centerPoint = [31.323443, 120.631841];
+      const selectedTypes = Array.from(document.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.dataset.type);
+      const keyword = document.getElementById('keyword-search').value.toLowerCase();
+      
+      allData.forEach(item => {
+        const marker = markers[item.id];
+        const distance = map.distance(centerPoint, item.coordinates);
+        
+        // 检查是否满足筛选条件
+        const inRadius = distance <= currentRadius;
+        const typeMatch = selectedTypes.includes(item.type);
+        const keywordMatch = !keyword || item.name.toLowerCase().includes(keyword) || item.address.toLowerCase().includes(keyword);
+        
+        if (inRadius && typeMatch && keywordMatch) {
+          marker.addTo(map);
+        } else {
+          map.removeLayer(marker);
+        }
+      });
+    }
+    
+    // 应用筛选按钮点击事件
+    document.getElementById('apply-filter').addEventListener('click', filterMarkers);
+    
+    // 显示信息卡片的函数
+    function showInfoCard(item) {
+      const infoCard = document.getElementById('info-card');
+      const title = document.getElementById('info-title');
+      const address = document.getElementById('info-address');
+      const visitors = document.getElementById('info-visitors');
+      const hours = document.getElementById('info-hours');
+      const phone = document.getElementById('info-phone');
+      const image = document.getElementById('info-image');
+      // 新增：环保信息相关元素
+      const environmentalInfo = document.getElementById('environmental-info');
+      const greeneryEvaluation = document.getElementById('greenery-evaluation');
+      const cleanlinessSituation = document.getElementById('cleanliness-situation');
+      
+      // 隐藏环保信息（默认）
+      environmentalInfo.classList.add('hidden');
+      
+      // 设置卡片内容
+      title.textContent = item.name;
+      address.textContent = item.address;
+      
+      if (item.type === 'attraction') {
+        visitors.innerHTML = `当前人流：<span class="font-medium">${item.visitors}</span>`;
+        hours.textContent = `开放时间：${item.hours}`;
+        phone.textContent = `联系电话：${item.phone}`;
+        
+        // 如果是大儒巷，显示环保信息
+        if (item.id === 'attraction-11') {
+          environmentalInfo.classList.remove('hidden');
+          greeneryEvaluation.textContent = `绿植布局评价：${item.greeneryEvaluation}`;
+          cleanlinessSituation.textContent = `街道清洁情况：${item.cleanlinessSituation}`;
+        }
+        
+        // 初始化游客流量图表
+        initVisitorChart();
+      } else if (item.type === 'construction') {
+        visitors.innerHTML = `<span class="text-warning">施工中</span>`;
+        hours.textContent = `预计工期：${item.startDate} 至 ${item.endDate}`;
+        phone.innerHTML = `<span class="text-gray-400">不适用</span>`;
+      } else if (item.type === 'traffic') {
+        visitors.innerHTML = `拥堵等级：<span class="font-medium text-danger">${item.level}</span>`;
+        hours.textContent = `更新时间：${new Date().toLocaleTimeString()}`;
+        phone.innerHTML = `<span class="text-gray-400">不适用</span>`;
+      } else if (item.type === 'shop') {
+        visitors.innerHTML = `<span class="text-secondary">营业中</span>`;
+        hours.textContent = `营业时间：${item.hours}`;
+        phone.textContent = `联系电话：${item.phone || '无'}`;
+      } else if (item.type === 'environmental') {
+        // 新增：环保区域信息展示
+        visitors.innerHTML = `<span class="text-success">环保示范区域</span>`;
+        hours.textContent = `评估时间：2025年11月`;
+        phone.innerHTML = `<span class="text-gray-400">不适用</span>`;
+        environmentalInfo.classList.remove('hidden');
+        greeneryEvaluation.textContent = `绿植布局评价：${item.greeneryEvaluation}`;
+        cleanlinessSituation.textContent = `街道清洁情况：${item.cleanlinessSituation}`;
+      }
+      
+      // 设置图片 - 支持环保区域多张图片轮播
+      if (item.type === 'environmental' && item.images && item.images.length > 1) {
+        // 创建轮播图
+        let carouselHTML = `
+          <div class="relative w-full h-full overflow-hidden">
+            <div class="carousel-container flex transition-transform duration-300 h-full">
+        `;
+        
+        // 添加所有图片
+        item.images.forEach(imgSrc => {
+          carouselHTML += `
+            <div class="carousel-slide flex-shrink-0 w-full h-full">
+              <img src="${imgSrc}" alt="${item.name}" class="w-full h-full object-cover">
+            </div>
+          `;
+        });
+        
+        carouselHTML += `
+            </div>
+            <div class="absolute bottom-2 left-0 right-0 flex justify-center space-x-2">
+        `;
+        
+        // 添加指示器
+        item.images.forEach((_, index) => {
+          carouselHTML += `
+            <button class="carousel-indicator w-2 h-2 rounded-full ${index === 0 ? 'bg-white' : 'bg-white/50'}" data-index="${index}"></button>
+          `;
+        });
+        
+        carouselHTML += `
+            </div>
+            <button class="carousel-prev absolute left-2 top-1/2 -translate-y-1/2 bg-black/30 hover:bg-black/50 w-8 h-8 rounded-full flex items-center justify-center">
+              <i class="fa fa-chevron-left text-white"></i>
+            </button>
+            <button class="carousel-next absolute right-2 top-1/2 -translate-y-1/2 bg-black/30 hover:bg-black/50 w-8 h-8 rounded-full flex items-center justify-center">
+              <i class="fa fa-chevron-right text-white"></i>
+            </button>
+          </div>
+        `;
+        
+        image.innerHTML = carouselHTML;
+        
+        // 初始化轮播图功能
+        initCarousel(image.querySelector('.carousel-container'), image.querySelectorAll('.carousel-slide'), image.querySelectorAll('.carousel-indicator'), image.querySelector('.carousel-prev'), image.querySelector('.carousel-next'));
+      } else {
+        // 单张图片显示
+        const imgSrc = item.images ? item.images[0] : item.image;
+        image.innerHTML = `<img src="${imgSrc}" alt="${item.name}" class="w-full h-full object-cover">`;
+      }
+      
+      // 显示卡片
+      infoCard.classList.remove('hidden');
+    }
+    
+    // 轮播图初始化函数
+    function initCarousel(container, slides, indicators, prevBtn, nextBtn) {
+      let currentIndex = 0;
+      const slideCount = slides.length;
+      
+      // 更新轮播图位置
+      function updateCarousel() {
+        container.style.transform = `translateX(-${currentIndex * 100}%)`;
+        
+        // 更新指示器
+        indicators.forEach((indicator, index) => {
+          if (index === currentIndex) {
+            indicator.classList.remove('bg-white/50');
+            indicator.classList.add('bg-white');
+          } else {
+            indicator.classList.remove('bg-white');
+            indicator.classList.add('bg-white/50');
+          }
+        });
+      }
+      
+      // 下一张
+      function nextSlide() {
+        currentIndex = (currentIndex + 1) % slideCount;
+        updateCarousel();
+      }
+      
+      // 上一张
+      function prevSlide() {
+        currentIndex = (currentIndex - 1 + slideCount) % slideCount;
+        updateCarousel();
+      }
+      
+      // 点击指示器
+      indicators.forEach((indicator, index) => {
+        indicator.addEventListener('click', () => {
+          currentIndex = index;
+          updateCarousel();
+        });
+      });
+      
+      // 点击按钮
+      if (nextBtn) {
+        nextBtn.addEventListener('click', nextSlide);
+      }
+      
+      if (prevBtn) {
+        prevBtn.addEventListener('click', prevSlide);
+      }
+      
+      // 自动轮播
+      let autoplayInterval = setInterval(nextSlide, 5000);
+      
+      // 鼠标悬停时暂停自动轮播
+      container.parentElement.addEventListener('mouseenter', () => {
+        clearInterval(autoplayInterval);
+      });
+      
+      // 鼠标离开时恢复自动轮播
+      container.parentElement.addEventListener('mouseleave', () => {
+        autoplayInterval = setInterval(nextSlide, 5000);
+      });
+    }
+    
+    // 关闭信息卡片
+    document.getElementById('close-info').addEventListener('click', () => {
+      document.getElementById('info-card').classList.add('hidden');
+    });
+    
+    // 地图点击隐藏信息卡片
+    map.on('click', () => {
+      document.getElementById('info-card').classList.add('hidden');
+    });
+    
+    // 查看详情按钮点击事件
+    document.querySelectorAll('.view-detail').forEach(btn => {
+      btn.addEventListener('click', function() {
+        const id = this.dataset.id;
+        const item = allData.find(item => item.id === id);
+        
+        if (item) {
+          // 将地图中心移动到标记位置
+          map.setView(item.coordinates, 17);
+          
+          // 显示信息卡片
+          showInfoCard(item);
+          
+          // 在移动端自动关闭侧边栏
+          if (window.innerWidth < 768) {
+            sidebar.classList.remove('w-72');
+            sidebar.classList.add('w-0');
+          }
+        }
+      });
+    });
+    
+    // 初始化游客流量图表
+    function initVisitorChart() {
+      const ctx = document.getElementById('visitor-chart').getContext('2d');
+      
+      // 检查是否已有图表实例
+      if (window.visitorChart) {
+        window.visitorChart.destroy();
+      }
+      
+      window.visitorChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: ['09:00', '11:00', '13:00', '15:00', '17:00', '19:00'],
+          datasets: [{
+            label: '游客数量',
+            data: [200, 450, 350, 500, 600, 300],
+            borderColor: '#36CFC9',
+            backgroundColor: 'rgba(54, 207, 201, 0.1)',
+            tension: 0.4,
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: false
+            }
+          },
+          scales: {
+            x: {
+              grid: {
+                display: false,
+                drawBorder: false
+              },
+              ticks: {
+                color: 'rgba(255, 255, 255, 0.5)',
+                font: {
+                  size: 8
+                }
+              }
+            },
+            y: {
+              grid: {
+                color: 'rgba(255, 255, 255, 0.1)',
+                drawBorder: false
+              },
+              ticks: {
+                color: 'rgba(255, 255, 255, 0.5)',
+                font: {
+                  size: 8
+                }
+              }
+            }
+          }
+        }
+      });
+    }
+    
+    // 移动端操作按钮
+    document.getElementById('zoom-in').addEventListener('click', () => {
+      map.zoomIn();
+    });
+    
+    document.getElementById('zoom-out').addEventListener('click', () => {
+      map.zoomOut();
+    });
+    
+    document.getElementById('my-location').addEventListener('click', () => {
+      // 尝试获取用户位置
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(position => {
+          const lat = position.coords.latitude;
+          const lng = position.coords.longitude;
+          
+          // 将地图中心移动到用户位置
+          map.setView([lat, lng], 17);
+          
+          // 添加用户位置标记
+          const userIcon = L.divIcon({
+            className: 'custom-marker',
+            html: '<div class="w-4 h-4 bg-green-500 rounded-full border-2 border-white"></div>',
+            iconSize: [20, 20],
+            iconAnchor: [10, 10]
+          });
+          
+          L.marker([lat, lng], { icon: userIcon }).addTo(map)
+            .bindPopup('您的当前位置')
+            .openPopup();
+        }, error => {
+          alert('无法获取您的位置，请检查定位权限设置。');
+        });
+      } else {
+        alert('您的浏览器不支持地理定位功能。');
+      }
+    });
+    
+    document.getElementById('show-info').addEventListener('click', () => {
+      // 显示关于页面
+      alert('苏州平江历史街区实时地图\n\n版本：1.0.0\n\n提供平江历史街区内的景点、交通、施工等实时信息。');
+    });
+    
+    // 刷新地图按钮
+    document.getElementById('refresh-map').addEventListener('click', function() {
+      // 添加刷新动画
+      const icon = this.querySelector('i');
+      icon.classList.add('fa-spin');
+      
+      // 模拟刷新操作
+      setTimeout(() => {
+        // 重新加载所有标记
+        filterMarkers();
+        
+        // 移除刷新动画
+        icon.classList.remove('fa-spin');
+        
+        // 显示刷新成功提示
+        alert('地图数据已更新！');
+      }, 1000);
+    });
+    
+    // 查看实时监控按钮
+    document.getElementById('view-monitor').addEventListener('click', () => {
+      alert('实时监控功能即将上线，敬请期待！');
+    });
+    
+    // 导航前往按钮
+    document.getElementById('get-direction').addEventListener('click', () => {
+      alert('导航功能即将上线，敬请期待！');
+    });
+    
+    // 初始化时选中默认半径按钮
+    document.querySelector('.radius-btn[data-radius="200"]').classList.add('bg-primary/20', 'text-primary');
+  </script>
+</body>
+</html>
